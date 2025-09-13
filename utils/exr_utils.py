@@ -738,6 +738,7 @@ class ExrProcessor:
     @staticmethod
     def export_multichannel_exr(image_tensor: torch.Tensor, 
                                alpha_tensor: torch.Tensor = None,
+                               depth_tensor: torch.Tensor = None,
                                layers_dict: Dict[str, torch.Tensor] = None,
                                cryptomatte_dict: Dict[str, torch.Tensor] = None,
                                filename: str = None, bit_depth: int = 32, 
@@ -748,6 +749,7 @@ class ExrProcessor:
         Args:
             image_tensor: Main RGB image tensor [1, H, W, 3]
             alpha_tensor: Alpha channel tensor [1, H, W] (optional)
+            depth_tensor: Depth/Z-depth tensor [1, H, W, 1] or [1, H, W] (optional)
             layers_dict: Dictionary of non-cryptomatte layers (optional)
             cryptomatte_dict: Dictionary of cryptomatte layers (optional)
             filename: Output filename
@@ -789,6 +791,27 @@ class ExrProcessor:
                 alpha_np = alpha_tensor.cpu().numpy()
             all_channels["A"] = alpha_np.astype(np.float32)
             channel_names.append("A")
+        
+        # Add depth channel if provided
+        if depth_tensor is not None:
+            if depth_tensor.ndim == 4 and depth_tensor.shape[0] == 1:
+                depth_np = depth_tensor.squeeze(0).cpu().numpy()
+            elif depth_tensor.ndim == 3 and depth_tensor.shape[0] == 1:
+                depth_np = depth_tensor.squeeze(0).cpu().numpy()
+            else:
+                depth_np = depth_tensor.cpu().numpy()
+            
+            # Handle depth data - ensure it's single channel
+            if len(depth_np.shape) == 3 and depth_np.shape[2] == 1:
+                depth_np = depth_np[:, :, 0]  # Remove channel dimension
+            elif len(depth_np.shape) == 3 and depth_np.shape[2] > 1:
+                # If multi-channel, use first channel as depth
+                depth_np = depth_np[:, :, 0]
+                debug_log(logger, "warning", "Multi-channel depth input, using first channel", 
+                         f"Depth tensor has {depth_np.shape[2]} channels, using first channel as Z")
+            
+            all_channels["Z"] = depth_np.astype(np.float32)
+            channel_names.append("Z")
         
         # Add layers from layers_dict (non-cryptomatte)
         if layers_dict:

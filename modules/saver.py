@@ -100,13 +100,16 @@ class SaverNode:
             },
             "optional": {
                 "alpha": ("MASK", {
-                    "description": "Alpha channel for multilayer EXR (matches loader output)"
+                    "tooltip": "Alpha channel for multilayer EXR export"
+                }),
+                "depth": ("IMAGE", {
+                    "tooltip": "Z-depth/depth map for multilayer EXR export"
                 }),
                 "layers": ("LAYERS", {
-                    "description": "Non-cryptomatte layers dict for multilayer EXR (matches loader output)"
+                    "tooltip": "Layer dictionary from EXR loader for multilayer export"
                 }),
                 "cryptomatte": ("CRYPTOMATTE", {
-                    "description": "Cryptomatte layers dict for multilayer EXR (matches loader output)"
+                    "tooltip": "Cryptomatte dictionary from EXR loader"
                 }),
             },
             "hidden": {
@@ -188,8 +191,8 @@ class SaverNode:
         return img_np
 
     def save_exr(self, img: np.ndarray, path: str, bit_depth: int, compression: str, 
-                 alpha_tensor: torch.Tensor = None, layers_dict: Dict = None, 
-                 cryptomatte_dict: Dict = None) -> None:
+                 alpha_tensor: torch.Tensor = None, depth_tensor: torch.Tensor = None,
+                 layers_dict: Dict = None, cryptomatte_dict: Dict = None) -> None:
         """Save EXR with multilayer support"""
         # Import the multilayer export function
         try:
@@ -201,6 +204,7 @@ class SaverNode:
         
         # Check if we have multilayer data
         has_multilayer = (alpha_tensor is not None or 
+                         depth_tensor is not None or
                          (layers_dict and len(layers_dict) > 0) or 
                          (cryptomatte_dict and len(cryptomatte_dict) > 0))
         
@@ -212,6 +216,7 @@ class SaverNode:
             ExrProcessor.export_multichannel_exr(
                 image_tensor=img_tensor,
                 alpha_tensor=alpha_tensor,
+                depth_tensor=depth_tensor,
                 layers_dict=layers_dict,
                 cryptomatte_dict=cryptomatte_dict,
                 filename=path,
@@ -320,7 +325,7 @@ class SaverNode:
     def save_images(self, images, file_path, filename, save_mode="single", file_type="png", 
                    bit_depth=None, quality=None, save_as_grayscale=None, use_versioning=False,
                    version=1, start_frame=None, frame_step=None, prompt=None, extra_pnginfo=None, 
-                   exr_compression=None, alpha=None, layers=None, cryptomatte=None, **kwargs):
+                   exr_compression=None, alpha=None, depth=None, layers=None, cryptomatte=None, **kwargs):
         """Main save function with optimized pipeline - handles missing contextual inputs and sequence mode"""
         
         # Provide format-specific defaults for missing inputs
@@ -396,7 +401,7 @@ class SaverNode:
                 
                 # Save based on format
                 if file_type == "exr":
-                    self.save_exr(img_np, out_path, bit_depth, exr_compression, alpha, layers, cryptomatte)
+                    self.save_exr(img_np, out_path, bit_depth, exr_compression, alpha, depth, layers, cryptomatte)
                 elif file_type == "png":
                     self.save_png(img_np, out_path, bit_depth)
                 elif file_type in ["jpg", "jpeg", "webp"]:

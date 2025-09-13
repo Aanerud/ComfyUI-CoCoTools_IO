@@ -830,13 +830,15 @@ class ExrProcessor:
                 depth_np = depth_tensor.cpu().numpy()
             
             # Handle depth data - ensure it's single channel
-            if len(depth_np.shape) == 3 and depth_np.shape[2] == 1:
-                depth_np = depth_np[:, :, 0]  # Remove channel dimension
-            elif len(depth_np.shape) == 3 and depth_np.shape[2] > 1:
-                # If multi-channel, use first channel as depth
-                depth_np = depth_np[:, :, 0]
-                debug_log(logger, "warning", "Multi-channel depth input, using first channel", 
-                         f"Depth tensor has {depth_np.shape[2]} channels, using first channel as Z")
+            if len(depth_np.shape) == 3:
+                if depth_np.shape[2] == 1:
+                    depth_np = depth_np[:, :, 0]  # Remove channel dimension
+                elif depth_np.shape[2] > 1:
+                    # If multi-channel, use first channel as depth
+                    num_channels = depth_np.shape[2]
+                    depth_np = depth_np[:, :, 0]
+                    debug_log(logger, "warning", "Multi-channel depth input, using first channel", 
+                             f"Depth tensor has {num_channels} channels, using first channel as Z")
             elif len(depth_np.shape) != 2:
                 debug_log(logger, "error", f"Invalid depth shape: {depth_np.shape}", 
                          f"Depth tensor has unsupported shape {depth_np.shape}, expected 2D or 3D")

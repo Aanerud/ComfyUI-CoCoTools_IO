@@ -789,6 +789,21 @@ class ExrProcessor:
                 alpha_np = alpha_tensor.squeeze(0).cpu().numpy()
             else:
                 alpha_np = alpha_tensor.cpu().numpy()
+            
+            # Ensure alpha is 2D and matches image dimensions
+            if len(alpha_np.shape) == 3 and alpha_np.shape[2] == 1:
+                alpha_np = alpha_np[:, :, 0]  # Remove channel dimension
+            elif len(alpha_np.shape) != 2:
+                debug_log(logger, "error", f"Invalid alpha shape: {alpha_np.shape}", 
+                         f"Alpha tensor has unsupported shape {alpha_np.shape}, expected 2D or 3D with 1 channel")
+                raise ValueError(f"Alpha tensor has unsupported shape {alpha_np.shape}")
+            
+            # Check if alpha matches image dimensions
+            if alpha_np.shape != (height, width):
+                debug_log(logger, "error", f"Alpha size mismatch: {alpha_np.shape} vs {(height, width)}", 
+                         f"Alpha tensor shape {alpha_np.shape} doesn't match image size {(height, width)}")
+                raise ValueError(f"Alpha tensor shape {alpha_np.shape} doesn't match image size {(height, width)}")
+            
             all_channels["A"] = alpha_np.astype(np.float32)
             channel_names.append("A")
         
@@ -809,6 +824,16 @@ class ExrProcessor:
                 depth_np = depth_np[:, :, 0]
                 debug_log(logger, "warning", "Multi-channel depth input, using first channel", 
                          f"Depth tensor has {depth_np.shape[2]} channels, using first channel as Z")
+            elif len(depth_np.shape) != 2:
+                debug_log(logger, "error", f"Invalid depth shape: {depth_np.shape}", 
+                         f"Depth tensor has unsupported shape {depth_np.shape}, expected 2D or 3D")
+                raise ValueError(f"Depth tensor has unsupported shape {depth_np.shape}")
+            
+            # Check if depth matches image dimensions
+            if depth_np.shape != (height, width):
+                debug_log(logger, "error", f"Depth size mismatch: {depth_np.shape} vs {(height, width)}", 
+                         f"Depth tensor shape {depth_np.shape} doesn't match image size {(height, width)}")
+                raise ValueError(f"Depth tensor shape {depth_np.shape} doesn't match image size {(height, width)}")
             
             all_channels["Z"] = depth_np.astype(np.float32)
             channel_names.append("Z")
@@ -868,6 +893,18 @@ class ExrProcessor:
         spec.channelnames = channel_names
         spec.attribute("compression", compression)
         spec.attribute("Software", "COCO Tools")
+        
+        # Debug: Check all channel shapes before stacking
+        debug_log(logger, "info", f"Preparing to stack {len(channel_names)} channels", 
+                 f"Channel shapes: {[(name, all_channels[name].shape) for name in channel_names]}")
+        
+        # Validate all channels have the same 2D shape
+        expected_shape = (height, width)
+        for name in channel_names:
+            if all_channels[name].shape != expected_shape:
+                debug_log(logger, "error", f"Shape mismatch for channel {name}", 
+                         f"Channel {name} has shape {all_channels[name].shape}, expected {expected_shape}")
+                raise ValueError(f"Channel {name} has shape {all_channels[name].shape}, expected {expected_shape}")
         
         # Stack all channel data in the correct order
         stacked_data = np.stack([all_channels[name] for name in channel_names], axis=2)

@@ -809,10 +809,23 @@ class ExrProcessor:
         
         # Add depth channel if provided
         if depth_tensor is not None:
-            if depth_tensor.ndim == 4 and depth_tensor.shape[0] == 1:
-                depth_np = depth_tensor.squeeze(0).cpu().numpy()
-            elif depth_tensor.ndim == 3 and depth_tensor.shape[0] == 1:
-                depth_np = depth_tensor.squeeze(0).cpu().numpy()
+            # Handle different tensor formats - depth_tensor might be a batch
+            if depth_tensor.ndim == 4:
+                # 4D tensor: [batch, height, width, channels] or [batch, channels, height, width]
+                if depth_tensor.shape[0] == 1:
+                    # Single image in batch
+                    depth_np = depth_tensor.squeeze(0).cpu().numpy()
+                else:
+                    # Multiple images - this shouldn't happen in single image export
+                    debug_log(logger, "warning", f"Depth tensor has batch size {depth_tensor.shape[0]}, using first image", 
+                             f"Depth tensor shape {depth_tensor.shape}, using first image for single EXR export")
+                    depth_np = depth_tensor[0].cpu().numpy()
+            elif depth_tensor.ndim == 3:
+                # 3D tensor: [height, width, channels] or [batch=1, height, width]
+                depth_np = depth_tensor.cpu().numpy()
+                if depth_np.shape[0] == 1 and depth_np.shape[1] > 1 and depth_np.shape[2] > 1:
+                    # Likely [1, height, width] format
+                    depth_np = depth_np.squeeze(0)
             else:
                 depth_np = depth_tensor.cpu().numpy()
             

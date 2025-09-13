@@ -382,6 +382,30 @@ class SaverNode:
                 # Prepare image (all formats start from float32 [0,1])
                 img_np = self.prepare_image(img_tensor, save_as_grayscale)
                 
+                # Extract corresponding multilayer data for this frame
+                frame_alpha = None
+                frame_depth = None
+                frame_layers = layers  # layers_dict typically doesn't change per frame
+                frame_cryptomatte = cryptomatte  # cryptomatte_dict typically doesn't change per frame
+                
+                # Handle alpha sequence
+                if alpha is not None:
+                    if len(alpha) > 1 and i < len(alpha):
+                        frame_alpha = alpha[i:i+1]  # Keep batch dimension for single image
+                    elif len(alpha) == 1:
+                        frame_alpha = alpha  # Use same alpha for all frames
+                    else:
+                        frame_alpha = None
+                
+                # Handle depth sequence  
+                if depth is not None:
+                    if len(depth) > 1 and i < len(depth):
+                        frame_depth = depth[i:i+1]  # Keep batch dimension for single image
+                    elif len(depth) == 1:
+                        frame_depth = depth  # Use same depth for all frames
+                    else:
+                        frame_depth = None
+                
                 # Build output path based on mode
                 if is_sequence_mode and SequenceHandler.detect_sequence_pattern(filename):
                     # Sequence mode with #### pattern
@@ -401,7 +425,7 @@ class SaverNode:
                 
                 # Save based on format
                 if file_type == "exr":
-                    self.save_exr(img_np, out_path, bit_depth, exr_compression, alpha, depth, layers, cryptomatte)
+                    self.save_exr(img_np, out_path, bit_depth, exr_compression, frame_alpha, frame_depth, frame_layers, frame_cryptomatte)
                 elif file_type == "png":
                     self.save_png(img_np, out_path, bit_depth)
                 elif file_type in ["jpg", "jpeg", "webp"]:

@@ -734,3 +734,128 @@ class ExrProcessor:
         except Exception as e:
             debug_log(logger, "error", "Error loading EXR", f"Error loading EXR file {image_path}: {str(e)}")
             raise
+
+    @staticmethod
+    def export_multichannel_exr(image_tensor: torch.Tensor, 
+                               alpha_tensor: torch.Tensor = None,
+                               layers_dict: Dict[str, torch.Tensor] = None,
+                               cryptomatte_dict: Dict[str, torch.Tensor] = None,
+                               filename: str = None, bit_depth: int = 32, 
+                               compression: str = "zips") -> None:
+        """
+        Export multilayer EXR file with channels matching the loader's structure.
+        
+        Args:
+            image_tensor: Main RGB image tensor [1, H, W, 3]
+            alpha_tensor: Alpha channel tensor [1, H, W] (optional)
+            layers_dict: Dictionary of non-cryptomatte layers (optional)
+            cryptomatte_dict: Dictionary of cryptomatte layers (optional)
+            filename: Output filename
+            bit_depth: Bit depth (16 or 32)
+            compression: Compression type
+        """
+        ExrProcessor.check_oiio_availability()
+        
+        if filename is None:
+            raise ValueError("filename is required for EXR export")
+            
+        if image_tensor is None:
+            raise ValueError("image_tensor is required for EXR export")
+            
+        # Convert tensor to numpy and get dimensions
+        if image_tensor.ndim == 4 and image_tensor.shape[0] == 1:
+            rgb_np = image_tensor.squeeze(0).cpu().numpy()
+        else:
+            rgb_np = image_tensor.cpu().numpy()
+            
+        height, width = rgb_np.shape[:2]
+        
+        # Collect all channels to write
+        all_channels = {}
+        channel_names = []
+        
+        # Add main RGB channels
+        if rgb_np.shape[2] >= 3:
+            all_channels["R"] = rgb_np[:, :, 0].astype(np.float32)
+            all_channels["G"] = rgb_np[:, :, 1].astype(np.float32) 
+            all_channels["B"] = rgb_np[:, :, 2].astype(np.float32)
+            channel_names.extend(["R", "G", "B"])
+        
+        # Add alpha channel if provided
+        if alpha_tensor is not None:
+            if alpha_tensor.ndim == 3 and alpha_tensor.shape[0] == 1:
+                alpha_np = alpha_tensor.squeeze(0).cpu().numpy()
+            else:
+                alpha_np = alpha_tensor.cpu().numpy()
+            all_channels["A"] = alpha_np.astype(np.float32)
+            channel_names.append("A")
+        
+        # Add layers from layers_dict (non-cryptomatte)
+        if layers_dict:
+            for layer_name, layer_tensor in layers_dict.items():
+                layer_np = layer_tensor.cpu().numpy()
+                if layer_np.ndim == 4 and layer_np.shape[0] == 1:
+                    layer_np = layer_np.squeeze(0)
+                
+                # Handle different layer types based on existing loader logic
+                if len(layer_np.shape) == 3 and layer_np.shape[2] == 3:
+                    # RGB layer (e.g., Beauty.R, Beauty.G, Beauty.B)
+                    all_channels[f"{layer_name}.R"] = layer_np[:, :, 0].astype(np.float32)
+                    all_channels[f"{layer_name}.G"] = layer_np[:, :, 1].astype(np.float32)
+                    all_channels[f"{layer_name}.B"] = layer_np[:, :, 2].astype(np.float32)
+                    channel_names.extend([f"{layer_name}.R", f"{layer_name}.G", f"{layer_name}.B"])
+                elif len(layer_np.shape) == 2:
+                    # Single channel layer (depth, mask, etc.)
+                    all_channels[layer_name] = layer_np.astype(np.float32)
+                    channel_names.append(layer_name)
+                else:
+                    debug_log(logger, "warning", f"Unsupported layer shape for {layer_name}", 
+                             f"Layer {layer_name} has unsupported shape {layer_np.shape}, skipping")
+        
+        # Add cryptomatte layers
+        if cryptomatte_dict:
+            for crypto_name, crypto_tensor in cryptomatte_dict.items():
+                crypto_np = crypto_tensor.cpu().numpy()
+                if crypto_np.ndim == 4 and crypto_np.shape[0] == 1:
+                    crypto_np = crypto_np.squeeze(0)
+                
+                if len(crypto_np.shape) == 3 and crypto_np.shape[2] == 3:
+                    # Cryptomatte RGB channels
+                    all_channels[f"{crypto_name}.R"] = crypto_np[:, :, 0].astype(np.float32)
+                    all_channels[f"{crypto_name}.G"] = crypto_np[:, :, 1].astype(np.float32)
+                    all_channels[f"{crypto_name}.B"] = crypto_np[:, :, 2].astype(np.float32)
+                    channel_names.extend([f"{crypto_name}.R", f"{crypto_name}.G", f"{crypto_name}.B"])
+                else:
+                    debug_log(logger, "warning", f"Unsupported cryptomatte shape for {crypto_name}",
+                             f"Cryptomatte {crypto_name} has unsupported shape {crypto_np.shape}, skipping")
+        
+        # Determine pixel type based on bit depth
+        if bit_depth == 16:
+            pixel_type = oiio.HALF
+            # Convert all channels to float16
+            for channel_name in all_channels:
+                all_channels[channel_name] = all_channels[channel_name].astype(np.float16)
+        else:  # 32-bit
+            pixel_type = oiio.FLOAT
+            # Already float32
+        
+        # Create ImageSpec with all channels
+        total_channels = len(all_channels)
+        spec = oiio.ImageSpec(width, height, total_channels, pixel_type)
+        spec.channelnames = channel_names
+        spec.attribute("compression", compression)
+        spec.attribute("Software", "COCO Tools")
+        
+        # Stack all channel data in the correct order
+        stacked_data = np.stack([all_channels[name] for name in channel_names], axis=2)
+        stacked_data = np.ascontiguousarray(stacked_data)
+        
+        # Write the file
+        buf = oiio.ImageBuf(spec)
+        buf.set_pixels(oiio.ROI(), stacked_data)
+        
+        if not buf.write(filename):
+            raise RuntimeError(f"Failed to write multilayer EXR: {oiio.geterror()}")
+            
+        debug_log(logger, "info", f"Exported multilayer EXR with {total_channels} channels",
+                 f"Successfully exported multilayer EXR: {filename} with channels: {channel_names}")

@@ -98,6 +98,17 @@ class SaverNode:
                 }),
                 "file_type": (["exr", "png", "jpg", "webp", "tiff"], {"default": "png", "formats": format_widgets}),
             },
+            "optional": {
+                "alpha": ("MASK", {
+                    "description": "Alpha channel for multilayer EXR (matches loader output)"
+                }),
+                "layers": ("LAYERS", {
+                    "description": "Non-cryptomatte layers dict for multilayer EXR (matches loader output)"
+                }),
+                "cryptomatte": ("CRYPTOMATTE", {
+                    "description": "Cryptomatte layers dict for multilayer EXR (matches loader output)"
+                }),
+            },
             "hidden": {
                 "prompt": "PROMPT",
                 "extra_pnginfo": "EXTRA_PNGINFO",
@@ -176,8 +187,43 @@ class SaverNode:
         
         return img_np
 
-    def save_exr(self, img: np.ndarray, path: str, bit_depth: int, compression: str) -> None:
-        """Save EXR with proper float handling"""
+    def save_exr(self, img: np.ndarray, path: str, bit_depth: int, compression: str, 
+                 alpha_tensor: torch.Tensor = None, layers_dict: Dict = None, 
+                 cryptomatte_dict: Dict = None) -> None:
+        """Save EXR with multilayer support"""
+        # Import the multilayer export function
+        try:
+            from ..utils.exr_utils import ExrProcessor
+        except ImportError:
+            # Fallback to single-layer if utils not available
+            self._save_single_layer_exr(img, path, bit_depth, compression)
+            return
+        
+        # Check if we have multilayer data
+        has_multilayer = (alpha_tensor is not None or 
+                         (layers_dict and len(layers_dict) > 0) or 
+                         (cryptomatte_dict and len(cryptomatte_dict) > 0))
+        
+        if has_multilayer:
+            # Convert numpy image back to tensor for multilayer export
+            img_tensor = torch.from_numpy(img).unsqueeze(0)  # Add batch dimension
+            
+            # Use the multilayer export function
+            ExrProcessor.export_multichannel_exr(
+                image_tensor=img_tensor,
+                alpha_tensor=alpha_tensor,
+                layers_dict=layers_dict,
+                cryptomatte_dict=cryptomatte_dict,
+                filename=path,
+                bit_depth=bit_depth,
+                compression=compression
+            )
+        else:
+            # Use single-layer export for backward compatibility
+            self._save_single_layer_exr(img, path, bit_depth, compression)
+    
+    def _save_single_layer_exr(self, img: np.ndarray, path: str, bit_depth: int, compression: str) -> None:
+        """Save single-layer EXR with proper float handling (original method)"""
         # Convert to appropriate type based on bit depth
         if bit_depth == 16:
             data = img.astype(np.float16)
@@ -274,7 +320,7 @@ class SaverNode:
     def save_images(self, images, file_path, filename, save_mode="single", file_type="png", 
                    bit_depth=None, quality=None, save_as_grayscale=None, use_versioning=False,
                    version=1, start_frame=None, frame_step=None, prompt=None, extra_pnginfo=None, 
-                   exr_compression=None, **kwargs):
+                   exr_compression=None, alpha=None, layers=None, cryptomatte=None, **kwargs):
         """Main save function with optimized pipeline - handles missing contextual inputs and sequence mode"""
         
         # Provide format-specific defaults for missing inputs
@@ -350,7 +396,7 @@ class SaverNode:
                 
                 # Save based on format
                 if file_type == "exr":
-                    self.save_exr(img_np, out_path, bit_depth, exr_compression)
+                    self.save_exr(img_np, out_path, bit_depth, exr_compression, alpha, layers, cryptomatte)
                 elif file_type == "png":
                     self.save_png(img_np, out_path, bit_depth)
                 elif file_type in ["jpg", "jpeg", "webp"]:
